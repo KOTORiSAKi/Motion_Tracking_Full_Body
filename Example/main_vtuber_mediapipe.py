@@ -209,67 +209,31 @@ while cap.isOpened():
                     py = int(face_preds[i*2 + 1] * face_size) + fy
                     cv2.circle(frame, (px, py), 2, (0, 255, 255), -1)
 
-        # ------------------ STEP 3: Hand Model (using MediaPipe for precise BBox) ------------------
-        # ใช้ MediaPipe หากล่องครอบมือที่เป๊ะ 100% แทนการเดาจากข้อศอก
+        # ------------------ STEP 3: Hand Model (using MediaPipe DIRECTLY) ------------------
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         hands_results = hands_detector.process(rgb_frame)
         if hands_results.multi_hand_landmarks:
             for hand_landmarks, handedness in zip(hands_results.multi_hand_landmarks, hands_results.multi_handedness):
-                # label จะบอกว่าเป็น "Left" หรือ "Right" ในรูปที่ถูก Mirror แล้ว
                 label = handedness.classification[0].label 
+                color = (255, 255, 0) if label == "Left" else (255, 0, 255)
                 
                 frame_h, frame_w = frame.shape[:2]
                 
-                # หาขอบเขต Bounding Box ของมือจาก 21 จุดของ MediaPipe
-                x_min = min([lm.x for lm in hand_landmarks.landmark])
-                x_max = max([lm.x for lm in hand_landmarks.landmark])
-                y_min = min([lm.y for lm in hand_landmarks.landmark])
-                y_max = max([lm.y for lm in hand_landmarks.landmark])
+                # ลากเส้นโครงกระดูกมือด้วยเครื่องมือของ MediaPipe
+                mp.solutions.drawing_utils.draw_landmarks(
+                    frame, 
+                    hand_landmarks, 
+                    mp_hands.HAND_CONNECTIONS,
+                    mp.solutions.drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                    mp.solutions.drawing_utils.DrawingSpec(color=color, thickness=2, circle_radius=2)
+                )
                 
-                x_min, x_max = int(x_min * frame_w), int(x_max * frame_w)
-                y_min, y_max = int(y_min * frame_h), int(y_max * frame_h)
-                
-                center_x = (x_min + x_max) / 2
-                center_y = (y_min + y_max) / 2
-                
-                box_w = x_max - x_min
-                box_h = y_max - y_min
-                
-                # 🌟 สร้างกล่องให้เหมือน FreiHAND Dataset 
-                # (FreiHAND ใช้ BBox ของเนื้อรูปมือจริงๆ ซึ่งใหญ่กว่า BBox ของโครงกระดูก MediaPipe เล็กน้อย)
-                # จึงต้องขยายขนาดกล่องจาก 1.5 เป็น 1.9 เพื่อชดเชยให้สัดส่วนมือเท่ากับตอนเทรน
-                hand_size = int(max(box_w, box_h) * 1.5)
-                
-                if hand_size > 40:
-                    hand_crop, hx, hy = get_square_crop(frame, int(center_x), int(center_y), hand_size)
-                    
-                    # สี: ซ้ายในจอ(ขวาจริง)=Cyan, ขวาในจอ(ซ้ายจริง)=Magenta
-                    color = (255, 255, 0) if label == "Left" else (255, 0, 255)
-                    cv2.rectangle(frame, (hx, hy), (hx + hand_size, hy + hand_size), color, 2)
-                    
-                    # 🌟 TRICK: ภาพถูกกลับซ้ายขวา (Mirror)
-                    # ถ้า MediaPipe บอกว่านี่คือ "Left" (นิ้วโป้งอยู่ขวา) -> ต้อง Flip ให้กลายเป็นมือขวาก่อนเข้าโมเดล
-                    needs_flip = (label == "Left")
-                    if needs_flip:
-                        hand_crop_model = cv2.flip(hand_crop, 1)
-                    else:
-                        hand_crop_model = hand_crop
-                    
-                    hand_input = preprocess_crop_torch(hand_crop_model)
-                    with torch.no_grad():
-                        hand_preds = hand_model(hand_input)[0].cpu().numpy()
-                    
-                    for i in range(21):
-                        px_norm = hand_preds[i*2]
-                        py_norm = hand_preds[i*2 + 1]
-                        
-                        # ถ้าพลิกภาพไป ต้องพลิกพิกัด X กลับคืนให้ตรงกับภาพบนจอ
-                        if needs_flip:
-                            px_norm = 1.0 - px_norm
-                            
-                        px = int(px_norm * hand_size) + hx
-                        py = int(py_norm * hand_size) + hy
-                        cv2.circle(frame, (px, py), 3, color, -1)
+                # ดึงพิกัด 21 จุดออกมาใช้กับ Live2D ได้เลย
+                for i, lm in enumerate(hand_landmarks.landmark):
+                    px = int(lm.x * frame_w)
+                    py = int(lm.y * frame_h)
+                    # วาดจุดทับอีกชั้นให้เห็นชัดเจน
+                    cv2.circle(frame, (px, py), 4, color, -1)
         
     # ------------------ FPS Calculation ------------------
     cTime = time.time()
@@ -283,3 +247,4 @@ while cap.isOpened():
 
 cap.release()
 cv2.destroyAllWindows()
+
