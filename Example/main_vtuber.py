@@ -155,6 +155,7 @@ hands_detector = mp_hands.Hands(
 # ==========================================
 cap = cv2.VideoCapture(0)
 pTime = 0
+prev_face_size = 0
 print("🎥 กล้องพร้อมใช้งาน! กด 'q' เพื่อออกจากโปรแกรม")
 
 while cap.isOpened():
@@ -190,11 +191,18 @@ while cap.isOpened():
         # ------------------ STEP 2: Face Model ------------------
         if nose[0] != 0 and nose[1] != 0:
             # คำนวณความกว้างใบหน้าจากระยะหู หรือระยะตา
-            face_width = np.linalg.norm(l_ear - r_ear)
-            if face_width < 10: face_width = np.linalg.norm(l_eye - r_eye) * 2.5
+            if l_ear[0] != 0 and r_ear[0] != 0:
+                face_width = np.linalg.norm(l_ear - r_ear)
+            elif l_eye[0] != 0 and r_eye[0] != 0:
+                face_width = np.linalg.norm(l_eye - r_eye) * 2.5
+            else:
+                face_width = prev_face_size / 1.5 if prev_face_size > 0 else 150
             
-            # ลดขนาดกรอบจาก 2.5 เหลือ 1.5 เพื่อให้ครอปได้ "พอดีกับใบหน้า" เหมือนตอนเทรน WFLW
-            face_size = int(face_width * 1.5) 
+            face_size = int(face_width * 1.5)
+            
+            if prev_face_size > 0:
+                face_size = int(0.7 * face_size + 0.3 * prev_face_size)
+            prev_face_size = face_size 
             
             if face_size > 50:
                 face_crop, fx, fy = get_square_crop(frame, int(nose[0]), int(nose[1]), face_size)
@@ -283,3 +291,6 @@ while cap.isOpened():
 
 cap.release()
 cv2.destroyAllWindows()
+
+
+
