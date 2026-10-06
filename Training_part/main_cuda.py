@@ -706,10 +706,23 @@ class HandTracker:
 
 @torch.inference_mode()
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    is_fp16 = device.type == "cuda"
+    print("="*50)
+    # --- เช็คและประกาศการใช้งาน CUDA ---
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        device_name = torch.cuda.get_device_name(0)
+        is_fp16 = True
+        print(f"✅ [CUDA ENABLED] ตรวจพบการรองรับ CUDA!")
+        print(f"🚀 กำลังรันระบบด้วย GPU: {device_name}")
+    else:
+        device = torch.device("cpu")
+        is_fp16 = False
+        print(f"⚠️ [CUDA DISABLED] ไม่พบ CUDA หรือ GPU ไม่รองรับ")
+        print(f"🐢 กำลังรันระบบด้วย CPU (อาจทำงานช้ากว่าปกติ)")
+
     dtype = torch.float16 if is_fp16 else torch.float32
-    print(f"🚀 Inference device: {device} | FP16: {is_fp16}")
+    print(f"⚙️ โหมดประมวลผล: {device} | ใช้ FP16: {is_fp16}")
+    print("="*50)
     
     if is_fp16: torch.backends.cudnn.benchmark = True
     else: torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 2)))
@@ -718,24 +731,17 @@ def main():
     base = os.path.dirname(os.path.abspath(__file__))
     face_model = load_model(FaceLandmarkModel(), os.path.join(base, "best_face_model.pth"), device, is_fp16)
     warmup(face_model, device, dtype, batches=(1,))
+    
     body_model = YOLO(os.path.join(base, "best.pt"))
-    if device.type == "cuda": body_model.to("cuda")
+    body_model.to(device) # บังคับให้ YOLO โหลดลง Device (CUDA/CPU) ที่ตรวจพบอย่างชัดเจน
 
     hand_task = os.path.join(base, "hand_landmarker.task")
     if not os.path.exists(hand_task):
         urllib.request.urlretrieve("https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task", hand_task)
-    
-    mp_delegate = mp_python.BaseOptions.Delegate.GPU if device.type == "cuda" else mp_python.BaseOptions.Delegate.CPU
-    hand_opts = mp_vision.HandLandmarkerOptions(
-        base_options=mp_python.BaseOptions(model_asset_path=hand_task, delegate=mp_delegate), num_hands=2,
+    hand_detector = mp_vision.HandLandmarker.create_from_options(mp_vision.HandLandmarkerOptions(
+        base_options=mp_python.BaseOptions(model_asset_path=hand_task), num_hands=2,
         min_hand_detection_confidence=0.5, min_hand_presence_confidence=0.5, min_tracking_confidence=0.5,
-        running_mode=mp_vision.RunningMode.VIDEO)
-    try:
-        hand_detector = mp_vision.HandLandmarker.create_from_options(hand_opts)
-    except Exception as e:
-        print(f"⚠️ MediaPipe GPU delegate failed, falling back to CPU...")
-        hand_opts.base_options.delegate = mp_python.BaseOptions.Delegate.CPU
-        hand_detector = mp_vision.HandLandmarker.create_from_options(hand_opts)
+        running_mode=mp_vision.RunningMode.VIDEO))
 
     sender = VMCSender(OSC_HOST, OSC_PORT, USE_OSC_BUNDLES, OSC_BUNDLE_CHUNK)
     mapper = Remapper(sender)
